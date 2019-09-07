@@ -1,0 +1,7 @@
+[package]
+name = "md2_attack"
+version = "0.1.0"
+authors = ["Grigory Dorodnov <grigoriy714@gmail.com>"]
+edition = "2018"
+
+[dependencies]
