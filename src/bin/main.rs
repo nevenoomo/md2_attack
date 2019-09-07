@@ -1,5 +1,5 @@
 //! # MD2 hashing, compression and peimage calculation
-//! 
+//!
 //! A CLI application.
 //! Usage: md2_attack MODE BLOCKS
 //!     MODE:
@@ -11,9 +11,9 @@
 //!         block    - ex. "1 2 3 0 1 2 3 0 1 2 3 0 1 2 3 0"
 
 use std::env;
-use std::vec::Vec;
-use std::string::String;
 use std::iter::Iterator;
+use std::string::String;
+use std::vec::Vec;
 
 fn main() {
     let mut args = env::args().skip(1); // skipping the name of the program
@@ -25,23 +25,26 @@ fn main() {
             let message = collect_message(args);
             let digest = md2_attack::md2_simpler::digest(message);
             digest.iter().for_each(|x| print!("{} ", x));
-        },
-        "compress" => {},
-        "preimage" => {},
+        }
+        "compress" => {}
+        "preimage" => {}
         _ => panic!("Mode {} is not recognized.", mode),
     }
 }
 
 fn collect_message<I>(blocks: I) -> Vec<u8>
 where
-    I: Iterator<Item = String>
+    I: Iterator<Item = String>,
 {
     let mut v = Vec::new();
 
-    for block in blocks{
-        v.append(&mut block.split(' ').map(|x| {
-            x.parse::<u8>().expect("Incorrect characters in blocks")
-        }).collect());
+    for block in blocks {
+        v.append(
+            &mut block
+                .split(' ')
+                .map(|x| x.parse::<u8>().expect("Incorrect characters in blocks"))
+                .collect(),
+        );
     }
 
     v
