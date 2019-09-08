@@ -17,19 +17,25 @@ use std::vec::Vec;
 
 fn main() {
     let mut args = env::args().skip(1); // skipping the name of the program
-
     let mode = args.next().expect("Mode expected as the first arg.");
+    let mut result = [0u8; 16];
 
     match mode.as_str() {
         "md2" => {
             let message = collect_message(args);
-            let digest = md2_attack::md2_simpler::digest(message);
-            digest.iter().for_each(|x| print!("{} ", x));
+            result = md2_attack::md2_simpler::digest(message);
         }
-        "compress" => {}
+        "compress" => {
+            let state = collect_block(args.next().expect("A message block M expected"));
+            let message = collect_block(args.next().expect("A state block H expected"));
+
+            result = md2_attack::md2_simpler::compress(&state, &message);
+        }
         "preimage" => {}
         _ => panic!("Mode {} is not recognized.", mode),
     }
+
+    result.iter().for_each(|x| print!("{} ", x));
 }
 
 fn collect_message<I>(blocks: I) -> Vec<u8>
@@ -40,12 +46,16 @@ where
 
     for block in blocks {
         v.append(
-            &mut block
-                .split(' ')
-                .map(|x| x.parse::<u8>().expect("Incorrect characters in blocks"))
-                .collect(),
+            &mut collect_block(block)
         );
     }
 
     v
+}
+
+fn collect_block(block: String) -> Vec<u8> {
+    block
+        .split(' ')
+        .map(|x| x.parse::<u8>().expect("Incorrect characters in blocks"))
+        .collect()
 }
