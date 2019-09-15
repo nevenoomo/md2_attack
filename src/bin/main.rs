@@ -23,15 +23,20 @@ fn main() {
     match mode.as_str() {
         "md2" => {
             let message = collect_message(args);
-            result = md2_attack::md2_simpler::digest(message);
+            result = md2_attack::md2::digest(message);
         }
         "compress" => {
-            let state = collect_block(args.next().expect("A message block M expected"));
-            let message = collect_block(args.next().expect("A state block H expected"));
+            let state = collect_block(args.next().expect("A state block H expected"));
+            let message = collect_block(args.next().expect("A message block M expected"));
 
-            result = md2_attack::md2_simpler::compress(&state, &message);
+            result = md2_attack::md2::compress(&state, &message);
         }
-        "preimage" => {}
+        "preimage" => {
+            let state1 = collect_block(args.next().expect("A state block H_i expected"));
+            let state2 = collect_block(args.next().expect("A state block H_i expected"));
+
+            result = md2_attack::attack::get_preimage(&state1, &state2);
+        }
         _ => panic!("Mode {} is not recognized.", mode),
     }
 
@@ -45,9 +50,7 @@ where
     let mut v = Vec::new();
 
     for block in blocks {
-        v.append(
-            &mut collect_block(block)
-        );
+        v.append(&mut collect_block(block));
     }
 
     v

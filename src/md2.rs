@@ -1,11 +1,12 @@
 //! # MD2 Simpler module
 //!
-//! MD2 Simpler implements the (md2 algorithm)[https://tools.ietf.org/html/rfc1319], but
+//! MD2 Simpler implements the [md2 algorithm](https://tools.ietf.org/html/rfc1319), but
 //! operating bytes only with values in the interval from 0 up to 3.  
 
 use std::vec::Vec;
 
-static S: [u8; 4] = [1, 3, 0, 2];
+pub static S: [u8; 4] = [1, 3, 0, 2];
+pub static S_rev: [u8; 4] = [2, 0, 3, 1];
 
 /// Calculates a MD2 digest for a given message
 pub fn digest(mut m: Vec<u8>) -> [u8; 16] {
@@ -63,7 +64,6 @@ mod stages {
             buf[i + 16] = block[i];
             buf[i + 32] = buf[i + 16] ^ buf[i];
         }
-        
         let mut t: u8 = 0;
         for i in 0..18 {
             for j in 0..48 {
@@ -106,6 +106,7 @@ mod test {
             .split(' ')
             .map(|x| x.parse::<u8>().unwrap())
             .collect::<Vec<u8>>();
+
         let res = "3 3 0 0 1 3 1 2 0 0 2 3 3 3 0 1"
             .split(' ')
             .map(|x| x.parse::<u8>().unwrap())
