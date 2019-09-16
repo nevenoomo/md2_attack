@@ -18,7 +18,7 @@ use std::vec::Vec;
 fn main() {
     let mut args = env::args().skip(1); // skipping the name of the program
     let mode = args.next().expect("Mode expected as the first arg.");
-    let mut result = [0u8; 16];
+    let result;
 
     match mode.as_str() {
         "md2" => {
