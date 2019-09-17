@@ -6,7 +6,7 @@
 use std::vec::Vec;
 
 pub static S: [u8; 4] = [1, 3, 0, 2];
-pub static S_rev: [u8; 4] = [2, 0, 3, 1];
+pub static S_REV: [u8; 4] = [2, 0, 3, 1];
 
 /// Calculates a MD2 digest for a given message
 pub fn digest(mut m: Vec<u8>) -> [u8; 16] {

@@ -41,6 +41,7 @@ fn main() {
     }
 
     result.iter().for_each(|x| print!("{} ", x));
+    println!();
 }
 
 fn collect_message<I>(blocks: I) -> Vec<u8>

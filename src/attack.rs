@@ -3,10 +3,8 @@
 //! The attack is described [here](https://link.springer.com/content/pdf/10.1007%2F978-3-540-30539-2_16.pdf).
 
 use std::collections::HashMap;
-use std::sync::mpsc;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::thread;
-use threadpool::ThreadPool;
 
 type Matrix = [[u8; 16]; 19];
 type Column = [u8; 19];
@@ -23,7 +21,6 @@ enum CtlMessage<T> {
 
 pub fn get_preimage(s_init: &[u8], s_final: &[u8]) -> [u8; 16] {
     for i in 0..4u8 {
-        println!("Trying byte {}", i); //DEBUG
         let mut s1 = [0u8; 16];
         let mut s2 = [0u8; 16];
         s1.copy_from_slice(s_init);
@@ -47,60 +44,11 @@ fn do_calculations(a: u8, s1: Row, s2: Row) -> Option<Row> {
                     let t = Arc::new(RwLock::new(Table::new()));
                     let b_guess = [b0, b1, b2, b3];
 
-                    println!("Trying b array {:?}", &b_guess[..]); //DEBUG
-
                     fill_tables(t.clone(), a_mat.clone(), c_col.clone(), b_guess);
-
-                    println!("Tables are computed"); //DEBUG
 
                     if let Some(res) = step2::get_correct_message(t.clone(), &s1, &s2) {
                         return Some(res);
                     }
-                }
-            }
-        }
-    }
-
-    None
-}
-
-fn do_calculations_conc(a: u8, s1: Row, s2: Row) -> Option<Row> {
-    const NUM_WORKERS: usize = 4;
-    let (a_mat, c_col) = step1::compute_matrix_a(&s1, &s2, a);
-
-    let (send_fin, recv_fin) = mpsc::channel::<CtlMessage<Row>>();
-    let (send_term, recv_term) = mpsc::channel::<CtlMessage<Row>>();
-    let recv_term = Arc::new(Mutex::new(recv_term));
-
-    let tp = ThreadPool::new(NUM_WORKERS);
-
-    //UGLY use iterator instead
-    for b0 in 0..4u8 {
-        for b1 in 0..4u8 {
-            for b2 in 0..4u8 {
-                for b3 in 0..4u8 {
-                    let t = Arc::new(RwLock::new(Table::new()));
-                    let b_guess = [b0, b1, b2, b3];
-                    let tab = t.clone();
-                    let sf = send_fin.clone();
-                    let rt = recv_term.clone();
-                    let st1 = s1;
-                    let st2 = s2;
-                    let a = a_mat.clone();
-                    let c = c_col.clone();
-
-                    tp.execute(move || {
-                        println!("Trying b array {:?}", &b_guess[..]); //DEBUG
-
-                        fill_tables(tab.clone(), a, c, b_guess);
-
-                        println!("Tables are computed"); //DEBUG
-
-                        if let Some(res) = step2::get_correct_message(tab, &st1, &st2) {
-                            sf.send(CtlMessage::<Row>::Res(res))
-                                .expect("Broken channel");
-                        }
-                    });
                 }
             }
         }
@@ -186,14 +134,14 @@ mod step1 {
         fill_third_row(a_mat, b);
         for i in 3..18 {
             for j in (0..(18 - i)).rev() {
-                a_mat[i][j] = md2::S_rev[(a_mat[i - 1][j + 1] ^ a_mat[i][j + 1]) as usize];
+                a_mat[i][j] = md2::S_REV[(a_mat[i - 1][j + 1] ^ a_mat[i][j + 1]) as usize];
             }
 
-            c_col[i - 1] = (md2::S_rev[(a_mat[i][0] ^ a_mat[i - 1][0]) as usize]
+            c_col[i - 1] = (md2::S_REV[(a_mat[i][0] ^ a_mat[i - 1][0]) as usize]
                 + (4 - (i as u8 - 2) % 4))
                 % 4;
         }
-        c_col[17] = (md2::S_rev[(a_mat[18][0] ^ a_mat[18 - 1][0]) as usize]) % 4;
+        c_col[17] = (md2::S_REV[(a_mat[18][0] ^ a_mat[18 - 1][0]) as usize]) % 4;
 
         c_col
     }
@@ -299,7 +247,6 @@ mod step2 {
                         for m2 in v2 {
                             &m[..8].copy_from_slice(m1);
                             &m[8..].copy_from_slice(m2);
-                            // println!("Trying message {:?}", &m); //DEBUG
 
                             if md2::compress(&st1, &m) == st2 {
                                 // Send result to the main thread
@@ -366,7 +313,6 @@ mod step2 {
             let mut tab = t.write().expect("Concurrency error");
 
             if tab.contains_key(&cortege) {
-                //IDEA try out entry API for HashMap
                 tab.get_mut(&cortege).unwrap().0.push(m1); // push a message to the corresponding value
             } else {
                 tab.insert(cortege, (vec![m1], vec![]));
@@ -390,7 +336,6 @@ mod step2 {
             let mut tab = t.write().expect("Concurrency error");
 
             if tab.contains_key(&cortege) {
-                //IDEA try out entry API for HashMap
                 tab.get_mut(&cortege).unwrap().1.push(m2); // push a message to the corresponding value
             } else {
                 tab.insert(cortege, (vec![], vec![m2]));
@@ -429,10 +374,10 @@ mod step2 {
         let mut b = *b_guess;
 
         for i in (0..8).rev() {
-            b[3] = md2::S_rev[(b[2] ^ b[3]) as usize];
-            b[2] = md2::S_rev[(b[1] ^ b[2]) as usize];
-            b[1] = md2::S_rev[(b[0] ^ b[1]) as usize];
-            b[0] = md2::S_rev[(m[i] ^ b[0]) as usize];
+            b[3] = md2::S_REV[(b[2] ^ b[3]) as usize];
+            b[2] = md2::S_REV[(b[1] ^ b[2]) as usize];
+            b[1] = md2::S_REV[(b[0] ^ b[1]) as usize];
+            b[0] = md2::S_REV[(m[i] ^ b[0]) as usize];
         }
 
         b
@@ -443,10 +388,10 @@ mod step2 {
         c.copy_from_slice(&c_col[1..5]);
 
         for i in (0..8).rev() {
-            c[3] = md2::S_rev[(c[2] ^ c[3]) as usize];
-            c[2] = md2::S_rev[(c[1] ^ c[2]) as usize];
-            c[1] = md2::S_rev[(c[0] ^ c[1]) as usize];
-            c[0] = md2::S_rev[(c_upper[i] ^ c[0]) as usize];
+            c[3] = md2::S_REV[(c[2] ^ c[3]) as usize];
+            c[2] = md2::S_REV[(c[1] ^ c[2]) as usize];
+            c[1] = md2::S_REV[(c[0] ^ c[1]) as usize];
+            c[0] = md2::S_REV[(c_upper[i] ^ c[0]) as usize];
         }
 
         c
@@ -623,10 +568,6 @@ mod test {
             .split(' ')
             .map(|x| x.parse::<u8>().unwrap())
             .collect::<Vec<u8>>();
-        let res = "0 0 3 2 2 2 1 0 0 0 3 0 3 3 1 2"
-            .split(' ')
-            .map(|x| x.parse::<u8>().unwrap())
-            .collect::<Vec<u8>>();
 
         let preimage = super::get_preimage(s1.as_slice(), s2.as_slice());
         println!("{:?}", preimage);
@@ -678,7 +619,7 @@ mod test {
         super::fill_tables(t.clone(), a_mat.clone(), c_col.clone(), b_guess);
 
         match super::step2::get_correct_message(t.clone(), &s1, &s2) {
-            Some(res) => return,
+            Some(_) => return,
             _ => panic!(""),
         }
     }
