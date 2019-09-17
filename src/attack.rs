@@ -3,8 +3,10 @@
 //! The attack is described [here](https://link.springer.com/content/pdf/10.1007%2F978-3-540-30539-2_16.pdf).
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
+use threadpool::ThreadPool;
 
 type Matrix = [[u8; 16]; 19];
 type Column = [u8; 19];
@@ -13,6 +15,12 @@ type HalfMessage = [u8; 8];
 type MessageTable = (Vec<HalfMessage>, Vec<HalfMessage>);
 type Table = HashMap<step2::Cortege, MessageTable>;
 
+enum CtlMessage<T> {
+    Terminate,
+    Finished,
+    Res(T),
+}
+
 pub fn get_preimage(s_init: &[u8], s_final: &[u8]) -> [u8; 16] {
     for i in 0..4u8 {
         println!("Trying byte {}", i); //DEBUG
@@ -20,8 +28,9 @@ pub fn get_preimage(s_init: &[u8], s_final: &[u8]) -> [u8; 16] {
         let mut s2 = [0u8; 16];
         s1.copy_from_slice(s_init);
         s2.copy_from_slice(s_final);
-
-        do_calculations(i, s1, s2);
+        if let Some(res) = do_calculations(i, s1, s2) {
+            return res;
+        }
     }
 
     panic!("No message found");
@@ -30,32 +39,17 @@ pub fn get_preimage(s_init: &[u8], s_final: &[u8]) -> [u8; 16] {
 fn do_calculations(a: u8, s1: Row, s2: Row) -> Option<Row> {
     let (a_mat, c_col) = step1::compute_matrix_a(&s1, &s2, a);
 
-    let t = Arc::new(RwLock::new(Table::new()));
-
     //UGLY use iterator instead
     for b0 in 0..4u8 {
         for b1 in 0..4u8 {
             for b2 in 0..4u8 {
                 for b3 in 0..4u8 {
+                    let t = Arc::new(RwLock::new(Table::new()));
                     let b_guess = [b0, b1, b2, b3];
+
                     println!("Trying b array {:?}", &b_guess[..]); //DEBUG
 
-                    let t1 = t.clone();
-                    let t2 = t.clone();
-                    let a1_mat = a_mat.clone();
-                    let a2_mat = a_mat.clone();
-                    let c_column = c_col.clone();
-
-                    let hnd_table1 = thread::spawn(move || {
-                        step2::fill_t1(t1, &b_guess, a1_mat);
-                    });
-
-                    let hnd_table2 = thread::spawn(move || {
-                        step2::fill_t2(t2, &b_guess, a2_mat, c_column);
-                    });
-
-                    hnd_table1.join().expect("Error while filling tables");
-                    hnd_table2.join().expect("Error while filling tables");
+                    fill_tables(t.clone(), a_mat.clone(), c_col.clone(), b_guess);
 
                     println!("Tables are computed"); //DEBUG
 
@@ -68,6 +62,70 @@ fn do_calculations(a: u8, s1: Row, s2: Row) -> Option<Row> {
     }
 
     None
+}
+
+fn do_calculations_conc(a: u8, s1: Row, s2: Row) -> Option<Row> {
+    const NUM_WORKERS: usize = 4;
+    let (a_mat, c_col) = step1::compute_matrix_a(&s1, &s2, a);
+
+    let (send_fin, recv_fin) = mpsc::channel::<CtlMessage<Row>>();
+    let (send_term, recv_term) = mpsc::channel::<CtlMessage<Row>>();
+    let recv_term = Arc::new(Mutex::new(recv_term));
+
+    let tp = ThreadPool::new(NUM_WORKERS);
+
+    //UGLY use iterator instead
+    for b0 in 0..4u8 {
+        for b1 in 0..4u8 {
+            for b2 in 0..4u8 {
+                for b3 in 0..4u8 {
+                    let t = Arc::new(RwLock::new(Table::new()));
+                    let b_guess = [b0, b1, b2, b3];
+                    let tab = t.clone();
+                    let sf = send_fin.clone();
+                    let rt = recv_term.clone();
+                    let st1 = s1;
+                    let st2 = s2;
+                    let a = a_mat.clone();
+                    let c = c_col.clone();
+
+                    tp.execute(move || {
+                        println!("Trying b array {:?}", &b_guess[..]); //DEBUG
+
+                        fill_tables(tab.clone(), a, c, b_guess);
+
+                        println!("Tables are computed"); //DEBUG
+
+                        if let Some(res) = step2::get_correct_message(tab, &st1, &st2) {
+                            sf.send(CtlMessage::<Row>::Res(res))
+                                .expect("Broken channel");
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn fill_tables(t: Arc<RwLock<Table>>, a_mat: Arc<Matrix>, c_col: Arc<Column>, b_guess: [u8; 4]) {
+    let t1 = t.clone();
+    let t2 = t.clone();
+    let a1_mat = a_mat.clone();
+    let a2_mat = a_mat.clone();
+    let c_column = c_col.clone();
+
+    let hnd_table1 = thread::spawn(move || {
+        step2::fill_t1(t1, &b_guess, a1_mat);
+    });
+
+    let hnd_table2 = thread::spawn(move || {
+        step2::fill_t2(t2, &b_guess, a2_mat, c_column);
+    });
+
+    hnd_table1.join().expect("Error while filling tables");
+    hnd_table2.join().expect("Error while filling tables");
 }
 
 mod step1 {
@@ -151,13 +209,7 @@ mod step2 {
     type PartB = [u8; 4];
     type PartC = [u8; 4];
 
-    enum CtlMessage<T> {
-        Terminate,
-        Finished,
-        Res(T),
-    }
-
-    #[derive(PartialEq, Hash, Eq)]
+    #[derive(PartialEq, Hash, Eq, Debug)]
     pub struct Cortege {
         b: PartB,
         c: PartC,
@@ -209,7 +261,7 @@ mod step2 {
         s_init: &[u8],
         s_final: &[u8],
     ) -> Option<[u8; 16]> {
-        const NUM_OF_THREADS: usize = 3;
+        const NUM_OF_THREADS: usize = 5;
 
         let (send_fin, recv_fin) = mpsc::channel::<CtlMessage<Row>>();
         let (send_term, recv_term) = mpsc::channel::<CtlMessage<Row>>();
@@ -233,30 +285,26 @@ mod step2 {
                 let tab = tab.read().expect("Concurrency error");
                 let st1 = st1;
                 let st2 = st2;
+                let to_process = if i == NUM_OF_THREADS - 1 {
+                    tab.len() - i * task_size
+                } else {
+                    task_size
+                };
 
-                for (v1, v2) in tab.values().skip(task_size * i) {
+                for (v1, v2) in tab.values().skip(task_size * i).take(to_process) {
+                    if v1.len() == 0 || v2.len() == 0 {
+                        continue;
+                    }
                     for m1 in v1 {
                         for m2 in v2 {
                             &m[..8].copy_from_slice(m1);
                             &m[8..].copy_from_slice(m2);
-                            println!("Trying message {:?}", &m); //DEBUG
+                            // println!("Trying message {:?}", &m); //DEBUG
 
                             if md2::compress(&st1, &m) == st2 {
                                 // Send result to the main thread
                                 sf.send(CtlMessage::<Row>::Res(m)).expect("Broken channel");
-                                loop {
-                                    // Wait for the main thread to terminate all workers
-                                    let r = rt
-                                        .lock()
-                                        .expect("Mutex lock error")
-                                        .recv()
-                                        .expect("Recv error");
-
-                                    match r {
-                            CtlMessage::<Row>::Terminate => return,
-                            _ => continue,
-                        }
-                                }
+                                return;
                             }
                         }
                         // Maybe it is time to finish
@@ -269,20 +317,22 @@ mod step2 {
                     }
                 }
 
-                sf.send(CtlMessage::<Row>::Finished).expect("Concurrency error");
+                sf.send(CtlMessage::<Row>::Finished)
+                    .expect("Concurrency error");
             }));
         }
 
         let mut cnt = 0;
-        loop{
+        loop {
             let r = recv_fin.try_recv();
 
             match r {
                 Ok(CtlMessage::<Row>::Res(result)) => {
                     for _ in children.iter() {
-                        send_term.send(CtlMessage::<Row>::Terminate).expect("Broken channel");
+                        send_term
+                            .send(CtlMessage::<Row>::Terminate)
+                            .expect("Broken channel");
                     }
-                    
                     for hdl in children.into_iter() {
                         hdl.join().expect("Concurrency error");
                     }
@@ -463,7 +513,6 @@ mod step2 {
                 .collect::<Vec<u8>>();
 
             let c_upper: Vec<u8> = s1.iter().zip(m.iter()).map(|(x, y)| x ^ y).collect();
-            println!("{:?}", c_upper);
             let a_mat = [
                 [1, 3, 2, 2, 0, 2, 1, 0, 0, 3, 3, 0, 1, 2, 3, 0],
                 [0, 2, 2, 2, 0, 3, 3, 2, 0, 2, 3, 2, 1, 1, 0, 1],
@@ -561,6 +610,8 @@ mod step2 {
 
 #[cfg(test)]
 mod test {
+    use std::sync::{Arc, RwLock};
+
     #[test]
     fn get_preimage() {
         let s1 = "0 1 2 3 0 1 2 3 0 1 2 3 0 1 2 3"
@@ -577,10 +628,59 @@ mod test {
             .map(|x| x.parse::<u8>().unwrap())
             .collect::<Vec<u8>>();
 
-        assert_eq!(
-            super::get_preimage(s1.as_slice(), s2.as_slice()),
-            res.as_slice()
-        );
+        let preimage = super::get_preimage(s1.as_slice(), s2.as_slice());
+        println!("{:?}", preimage);
+
+        if crate::md2::compress(&s1, &preimage) != s2.as_slice() {
+            panic!("Not preimage");
+        }
+    }
+
+    #[test]
+    fn get_preimage_with_known_params() {
+        let s1 = "1 3 2 2 0 2 1 0 0 3 3 0 1 2 3 0"
+            .split(' ')
+            .map(|x| x.parse::<u8>().unwrap())
+            .collect::<Vec<u8>>();
+
+        let s2 = "3 3 0 0 1 3 1 2 0 0 2 3 3 3 0 1"
+            .split(' ')
+            .map(|x| x.parse::<u8>().unwrap())
+            .collect::<Vec<u8>>();
+
+        let b_guess = [1, 3, 2, 1];
+        let a_mat = [
+            [1, 3, 2, 2, 0, 2, 1, 0, 0, 3, 3, 0, 1, 2, 3, 0],
+            [0, 2, 2, 2, 0, 3, 3, 2, 0, 2, 3, 2, 1, 1, 0, 1],
+            [1, 1, 1, 1, 3, 1, 0, 3, 2, 2, 3, 0, 0, 0, 1, 2],
+            [2, 1, 2, 1, 0, 0, 1, 0, 3, 0, 2, 0, 1, 3, 3, 0],
+            [0, 0, 3, 3, 2, 0, 0, 1, 0, 1, 1, 3, 3, 1, 0, 1],
+            [0, 1, 0, 2, 2, 0, 1, 2, 0, 0, 0, 2, 3, 3, 2, 1],
+            [0, 0, 1, 1, 1, 3, 3, 0, 1, 3, 2, 2, 3, 1, 1, 2],
+            [2, 0, 0, 0, 0, 2, 3, 2, 1, 0, 3, 0, 2, 1, 2, 2],
+            [1, 3, 2, 0, 1, 1, 0, 3, 3, 2, 3, 2, 2, 1, 1, 1],
+            [0, 2, 2, 0, 0, 0, 1, 0, 2, 2, 3, 0, 3, 3, 3, 3],
+            [1, 1, 1, 3, 2, 0, 0, 1, 1, 1, 0, 1, 0, 2, 3, 1],
+            [2, 1, 2, 3, 0, 1, 3, 3, 3, 3, 2, 1, 3, 0, 2, 1],
+            [0, 0, 3, 1, 3, 3, 1, 0, 2, 3, 0, 0, 2, 0, 3, 3],
+            [0, 1, 0, 0, 2, 3, 3, 2, 2, 3, 2, 0, 3, 2, 3, 1],
+            [0, 0, 1, 3, 0, 2, 3, 0, 3, 1, 1, 3, 1, 1, 0, 0],
+            [2, 0, 0, 2, 0, 3, 1, 3, 1, 2, 1, 0, 0, 0, 1, 3],
+            [2, 0, 1, 1, 3, 1, 2, 3, 3, 0, 0, 1, 3, 2, 1, 0],
+            [0, 1, 2, 1, 0, 0, 3, 1, 0, 1, 3, 3, 1, 1, 2, 0],
+            [3, 3, 0, 0, 1, 3, 1, 2, 0, 0, 2, 3, 3, 3, 0, 1],
+        ];
+        let a_mat = Arc::new(a_mat);
+        let c_col = [0, 0, 0, 1, 3, 2, 2, 3, 1, 0, 0, 1, 3, 2, 2, 0, 0, 1, 2];
+        let c_col = Arc::new(c_col);
+
+        let t = Arc::new(RwLock::new(super::Table::new()));
+        super::fill_tables(t.clone(), a_mat.clone(), c_col.clone(), b_guess);
+
+        match super::step2::get_correct_message(t.clone(), &s1, &s2) {
+            Some(res) => return,
+            _ => panic!(""),
+        }
     }
 
     #[test]

@@ -5,3 +5,4 @@ authors = ["Grigory Dorodnov <grigoriy714@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+threadpool = "1.7.1"
