@@ -42,7 +42,7 @@ fn do_calculations(a: u8, s1: Row, s2: Row) -> Option<Row> {
             for b2 in 0..4u8 {
                 for b3 in 0..4u8 {
                     let t = Arc::new(RwLock::new(Table::new()));
-                    let b_guess = [b0, b1, b2, b3];
+                    let b_guess = [b3, b2, b1, b0];
 
                     fill_tables(t.clone(), a_mat.clone(), c_col.clone(), b_guess);
 
